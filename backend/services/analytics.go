@@ -78,6 +78,11 @@ func NewAnalyticsService(db *gorm.DB) *AnalyticsService {
 }
 
 func (s *AnalyticsService) GetVolumeMetrics(period string, startDate, endDate time.Time) (*VolumeMetrics, error) {
+	// Use materialized view for daily aggregates if available
+	if period == "daily" {
+		return s.getVolumeMetricsFromMaterializedView(startDate, endDate)
+	}
+
 	var result struct {
 		TotalVolume float64
 		TotalCount  int64
@@ -103,7 +108,38 @@ func (s *AnalyticsService) GetVolumeMetrics(period string, startDate, endDate ti
 	}, nil
 }
 
+// getVolumeMetricsFromMaterializedView uses the daily_analytics_metrics materialized view
+func (s *AnalyticsService) getVolumeMetricsFromMaterializedView(startDate, endDate time.Time) (*VolumeMetrics, error) {
+	var result struct {
+		TotalVolume float64
+		TotalCount  int64
+	}
+
+	err := s.db.Table("daily_analytics_metrics").
+		Select("COALESCE(SUM(total_volume), 0) as total_volume, COALESCE(SUM(transaction_count), 0) as total_count").
+		Where("date >= ? AND date <= ?", startDate.Format("2006-01-02"), endDate.Format("2006-01-02")).
+		Scan(&result).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get volume metrics from view: %w", err)
+	}
+
+	return &VolumeMetrics{
+		Period:      "daily",
+		TotalVolume: result.TotalVolume,
+		TotalCount:  result.TotalCount,
+		Currency:    "USD",
+		StartDate:   startDate.Format("2006-01-02"),
+		EndDate:     endDate.Format("2006-01-02"),
+	}, nil
+}
+
 func (s *AnalyticsService) GetFeeMetrics(period string, startDate, endDate time.Time) (*FeeMetrics, error) {
+	// Use materialized view for daily aggregates if available
+	if period == "daily" {
+		return s.getFeeMetricsFromMaterializedView(startDate, endDate)
+	}
+
 	var result struct {
 		TotalFees      float64
 		PlatformFees   float64
@@ -132,6 +168,46 @@ func (s *AnalyticsService) GetFeeMetrics(period string, startDate, endDate time.
 
 	return &FeeMetrics{
 		Period:           period,
+		TotalFees:        result.TotalFees,
+		PlatformFees:     result.PlatformFees,
+		ForexFees:        result.ForexFees,
+		ComplianceFees:   result.ComplianceFees,
+		NetworkFees:      result.NetworkFees,
+		TransactionCount: result.TotalCount,
+		StartDate:        startDate.Format("2006-01-02"),
+		EndDate:          endDate.Format("2006-01-02"),
+	}, nil
+}
+
+// getFeeMetricsFromMaterializedView uses the daily_analytics_metrics materialized view
+func (s *AnalyticsService) getFeeMetricsFromMaterializedView(startDate, endDate time.Time) (*FeeMetrics, error) {
+	var result struct {
+		TotalFees      float64
+		PlatformFees   float64
+		ForexFees      float64
+		ComplianceFees float64
+		NetworkFees    float64
+		TotalCount     int64
+	}
+
+	err := s.db.Table("daily_analytics_metrics").
+		Select(`
+			COALESCE(SUM(total_fees), 0) as total_fees,
+			COALESCE(SUM(platform_fees), 0) as platform_fees,
+			COALESCE(SUM(forex_fees), 0) as forex_fees,
+			COALESCE(SUM(compliance_fees), 0) as compliance_fees,
+			COALESCE(SUM(network_fees), 0) as network_fees,
+			COALESCE(SUM(transaction_count), 0) as total_count
+		`).
+		Where("date >= ? AND date <= ?", startDate.Format("2006-01-02"), endDate.Format("2006-01-02")).
+		Scan(&result).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get fee metrics from view: %w", err)
+	}
+
+	return &FeeMetrics{
+		Period:           "daily",
 		TotalFees:        result.TotalFees,
 		PlatformFees:     result.PlatformFees,
 		ForexFees:        result.ForexFees,
@@ -224,6 +300,11 @@ func (s *AnalyticsService) GetTopCorridors(limit int, startDate, endDate time.Ti
 	}
 
 	return corridors, nil
+}
+
+// RefreshMaterializedViews refreshes the daily analytics materialized view
+func (s *AnalyticsService) RefreshMaterializedViews() error {
+	return s.db.Exec("REFRESH MATERIALIZED VIEW CONCURRENTLY daily_analytics_metrics").Error
 }
 
 func (s *AnalyticsService) CalculateDateRange(period string) (time.Time, time.Time, error) {

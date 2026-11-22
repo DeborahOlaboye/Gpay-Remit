@@ -70,6 +70,10 @@ func (h *SearchHandler) SearchTransactions(c *gin.Context) {
 		filterCurrency = cStr
 	}
 
+	// Search mode: "exact" for full-text search, "fuzzy" for trigram similarity
+	searchMode := c.DefaultQuery("search_mode", "exact")
+	similarityThreshold := c.DefaultQuery("similarity", "0.3")
+
 	// Sorting - validate and sanitize sort parameters
 	sortBy := c.DefaultQuery("sort_by", "created_at")
 	sortOrder := strings.ToUpper(c.DefaultQuery("sort_order", "DESC"))
@@ -87,10 +91,20 @@ func (h *SearchHandler) SearchTransactions(c *gin.Context) {
 
 	dialect := h.db.Dialector.Name()
 	if dialect == "postgres" {
-		// Use full-text search with parameterized query
-		// Count total results
-		countQuery := h.db.Model(&models.Payment{}).
-			Where("search_vector @@ plainto_tsquery(?)", q)
+		// Use full-text search or fuzzy trigram search
+		var countQuery *gorm.DB
+		var query *gorm.DB
+
+		if searchMode == "fuzzy" {
+			// Trigram-based fuzzy matching
+			countQuery = h.db.Model(&models.Payment{}).
+				Where("notes % ? OR currency % ? OR status % ?", q, q, q)
+		} else {
+			// Full-text search (default)
+			countQuery = h.db.Model(&models.Payment{}).
+				Where("search_vector @@ plainto_tsquery(?)", q)
+		}
+
 		if minAmount != nil {
 			countQuery = countQuery.Where("amount >= ?", *minAmount)
 		}
@@ -104,9 +118,15 @@ func (h *SearchHandler) SearchTransactions(c *gin.Context) {
 
 		// Query with parameterized values and safe column names
 		var payments []models.Payment
-		query := h.db.Model(&models.Payment{}).
-			Select("id, sender_id, recipient_id, amount, currency, status, notes, created_at").
-			Where("search_vector @@ plainto_tsquery(?)", q)
+		if searchMode == "fuzzy" {
+			query = h.db.Model(&models.Payment{}).
+				Select("id, sender_id, recipient_id, amount, currency, status, notes, created_at, similarity(notes, ?) as sim").
+				Where("notes % ? OR currency % ? OR status % ?", q, q, q, q)
+		} else {
+			query = h.db.Model(&models.Payment{}).
+				Select("id, sender_id, recipient_id, amount, currency, status, notes, created_at").
+				Where("search_vector @@ plainto_tsquery(?)", q)
+		}
 
 		if minAmount != nil {
 			query = query.Where("amount >= ?", *minAmount)
@@ -118,9 +138,15 @@ func (h *SearchHandler) SearchTransactions(c *gin.Context) {
 			query = query.Where("currency = ?", filterCurrency)
 		}
 
-		query = query.Order(fmt.Sprintf("%s %s", sortBy, sortOrder)).
-			Limit(pageSize).
-			Offset(offset)
+		if searchMode == "fuzzy" {
+			query = query.Order("sim DESC").
+				Limit(pageSize).
+				Offset(offset)
+		} else {
+			query = query.Order(fmt.Sprintf("%s %s", sortBy, sortOrder)).
+				Limit(pageSize).
+				Offset(offset)
+		}
 
 		if err := query.Find(&payments).Error; err != nil {
 			c.Error(errors.NewInternalError("Search failed", err))
@@ -129,15 +155,18 @@ func (h *SearchHandler) SearchTransactions(c *gin.Context) {
 
 		// Build response with highlighted results
 		for _, p := range payments {
-			// Use GORM's parameterized query for ts_headline
 			var highlightResult struct {
 				Highlight string
 			}
-			h.db.Raw(
-				"SELECT ts_headline('english', ?, plainto_tsquery(?), 'StartSel=<em>, StopSel=</em>') as highlight",
-				p.Notes,
-				q,
-			).Scan(&highlightResult)
+			if searchMode == "fuzzy" {
+				highlightResult.Highlight = p.Notes
+			} else {
+				h.db.Raw(
+					"SELECT ts_headline('english', ?, plainto_tsquery(?), 'StartSel=<em>, StopSel=</em>') as highlight",
+					p.Notes,
+					q,
+				).Scan(&highlightResult)
+			}
 
 			rows = append(rows, map[string]interface{}{
 				"id":              p.ID,

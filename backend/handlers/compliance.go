@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/Gpay-Remit/gpay-remit/errors"
+	"github.com/Gpay-Remit/gpay-remit/logger"
 	"github.com/Gpay-Remit/gpay-remit/models"
 	"gorm.io/gorm"
 )
@@ -22,8 +23,24 @@ func NewComplianceHandler(db *gorm.DB) *ComplianceHandler {
 	return &ComplianceHandler{db: db}
 }
 
-// GenerateComplianceReport generates AML/KYC reports for auditors
+// GenerateComplianceReport generates AML/KYC reports for admins only
 func (h *ComplianceHandler) GenerateComplianceReport(c *gin.Context) {
+	// Check admin role
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+
+	userRole, roleExists := c.Get("userRole")
+	if !roleExists || userRole.(string) != "admin" {
+		// Log compliance report access attempt by non-admin
+		uid := userID.(uint)
+		h.logComplianceAccess(&uid, http.StatusForbidden, "admin role required")
+		c.Error(errors.NewForbiddenError("Only admins can generate compliance reports"))
+		return
+	}
+
 	// Extract filters
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
@@ -110,7 +127,27 @@ func (h *ComplianceHandler) GenerateComplianceReport(c *gin.Context) {
 	}
 
 	filename := fmt.Sprintf("compliance_report_%s.csv", time.Now().Format("20060102_150405"))
+
+	// Audit log successful compliance report access
+	uid := userID.(uint)
+	h.logComplianceAccess(&uid, http.StatusOK, fmt.Sprintf("compliance report with %d transactions", len(payments)))
+
 	c.Header("Content-Description", "Compliance Report")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
 	c.Data(http.StatusOK, "text/csv", buf.Bytes())
+}
+
+// logComplianceAccess creates an audit log entry for compliance report access
+func (h *ComplianceHandler) logComplianceAccess(userID *uint, statusCode int, details string) {
+	auditLog := models.AuditLog{
+		UserID:         userID,
+		Action:         "compliance_report_access",
+		Resource:       "compliance_reports",
+		NewValue:       details,
+		ResponseStatus: statusCode,
+	}
+
+	if err := h.db.Create(&auditLog).Error; err != nil {
+		logger.Log.Errorf("Failed to create audit log: %v", err)
+	}
 }

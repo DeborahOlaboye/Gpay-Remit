@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -76,24 +77,86 @@ func (h *ExportHandler) ExportTransactions(c *gin.Context) {
 	}
 	offset := (pageNum - 1) * pageSizeNum
 
-	// Fetch payments
-	var payments []models.Payment
-	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSizeNum).Find(&payments).Error; err != nil {
-		c.Error(errors.NewInternalError("Failed to fetch transactions", err))
+	// Get user ID from context
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.Error(errors.NewUnauthorizedError("Unauthorized"))
 		return
 	}
 
-	if len(payments) == 0 {
-		c.Error(errors.NewNotFoundError("No transactions found"))
+	// Count total matching records
+	var total int64
+	countQuery := h.db.Model(&models.Payment{})
+	if startDate != "" {
+		if parsedDate, err := time.Parse("2006-01-02", startDate); err == nil {
+			countQuery = countQuery.Where("created_at >= ?", parsedDate)
+		}
+	}
+	if endDate != "" {
+		if parsedDate, err := time.Parse("2006-01-02", endDate); err == nil {
+			countQuery = countQuery.Where("created_at < ?", parsedDate.AddDate(0, 0, 1))
+		}
+	}
+	if status != "" {
+		countQuery = countQuery.Where("status = ?", status)
+	}
+	if currency != "" {
+		countQuery = countQuery.Where("currency = ?", currency)
+	}
+	countQuery.Count(&total)
+
+	// Check row cap
+	const maxRows = 10000
+	if total > maxRows {
+		c.Error(errors.NewValidationError("Export too large", fmt.Sprintf("Export limited to %d rows, found %d", maxRows, total)))
 		return
 	}
 
-	// Generate export based on format
+	// For CSV, generate immediately (small and fast)
 	if format == "csv" {
+		var payments []models.Payment
+		if err := query.Order("created_at DESC").Limit(pageSizeNum).Find(&payments).Error; err != nil {
+			c.Error(errors.NewInternalError("Failed to fetch transactions", err))
+			return
+		}
+
+		if len(payments) == 0 {
+			c.Error(errors.NewNotFoundError("No transactions found"))
+			return
+		}
+
 		h.exportCSV(c, payments)
-	} else {
-		h.exportPDF(c, payments)
+		return
 	}
+
+	// For PDF, create async export job
+	filters := map[string]interface{}{
+		"start_date": startDate,
+		"end_date":   endDate,
+		"status":     status,
+		"currency":   currency,
+	}
+
+	filtersJSON, _ := json.Marshal(filters)
+
+	job := models.ExportJob{
+		UserID:   userID.(uint),
+		Format:   format,
+		Status:   "pending",
+		RowCount: int32(total),
+		Filters:  filtersJSON,
+	}
+
+	if err := h.db.Create(&job).Error; err != nil {
+		c.Error(errors.NewInternalError("Failed to create export job", err))
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": "Export job created",
+		"job_id":  job.ID,
+		"status":  "pending",
+	})
 }
 
 func (h *ExportHandler) exportCSV(c *gin.Context, payments []models.Payment) {
@@ -343,4 +406,42 @@ func (h *ExportHandler) ScheduleExport(c *gin.Context) {
 		"message":  "Export schedule created successfully",
 		"schedule": schedule,
 	})
+}
+
+// GetExportJobStatus returns the status of an export job
+func (h *ExportHandler) GetExportJobStatus(c *gin.Context) {
+	jobID := c.Param("job_id")
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+
+	var job models.ExportJob
+	if err := h.db.Where("id = ? AND user_id = ?", jobID, userID.(uint)).First(&job).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.Error(errors.NewNotFoundError("Export job not found"))
+		} else {
+			c.Error(errors.NewInternalError("Failed to fetch export job", err))
+		}
+		return
+	}
+
+	response := gin.H{
+		"job_id":     job.ID,
+		"status":     job.Status,
+		"format":     job.Format,
+		"row_count":  job.RowCount,
+		"created_at": job.CreatedAt,
+		"updated_at": job.UpdatedAt,
+	}
+
+	if job.Status == "completed" {
+		response["file_path"] = job.FilePath
+	}
+	if job.Status == "failed" {
+		response["error"] = job.ErrorMessage
+	}
+
+	c.JSON(http.StatusOK, response)
 }
