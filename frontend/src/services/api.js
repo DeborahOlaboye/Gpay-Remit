@@ -184,4 +184,12 @@ export const getEmailPreferences = (config = {}) => api.get("/email-preferences"
 export const updateEmailPreferences = (prefs, config = {}) =>
   api.put("/email-preferences", prefs, config);
 
+// ── Export Schedules ────────────────────────────────────────────────────
+export const getExportSchedules = (config = {}) => api.get("/export-schedules", config);
+export const createExportSchedule = (data, config = {}) => api.post("/export-schedules", data, config);
+export const updateExportSchedule = (id, data, config = {}) =>
+  api.put(`/export-schedules/${id}`, data, config);
+export const deleteExportSchedule = (id, config = {}) =>
+  api.delete(`/export-schedules/${id}`, config);
+
 export default api;

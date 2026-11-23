@@ -94,6 +94,7 @@ func main() {
 	workers.StartMonitor(baseCtx, &wg)
 	workers.StartWebhookRetryWorker(baseCtx, &wg, db)
 	workers.StartPaymentRequestExpiryWorker(baseCtx, &wg, db)
+	workers.StartExportSchedulerWorker(baseCtx, &wg, db, cfg)
 	if cfg.RecurringWorkerEnabled {
 		workers.StartRecurringPaymentWorker(baseCtx, &wg, db, cfg)
 	}
@@ -276,6 +277,11 @@ func registerRoutes(router *gin.Engine, db, readDB *gorm.DB, cfg *config.Config)
 
 			exportHandler := handlers.NewExportHandler(db, readDB)
 			protected.GET("/transactions/export", exportHandler.ExportTransactions)
+			protected.POST("/export-schedules", exportHandler.CreateExportSchedule)
+			protected.GET("/export-schedules", exportHandler.ListExportSchedules)
+			protected.GET("/export-schedules/:id", exportHandler.GetExportSchedule)
+			protected.PUT("/export-schedules/:id", exportHandler.UpdateExportSchedule)
+			protected.DELETE("/export-schedules/:id", exportHandler.DeleteExportSchedule)
 
 			// Admin rate limit management endpoints
 			protected.POST("/admin/rate-limit/reset", middleware.RequireRole("admin"), middleware.AdminResetRateLimit(cfg))
@@ -406,6 +412,11 @@ func registerRoutes(router *gin.Engine, db, readDB *gorm.DB, cfg *config.Config)
 
 			exportHandler := handlers.NewExportHandler(db, readDB)
 			protected.GET("/transactions/export", exportHandler.ExportTransactions)
+			protected.POST("/export-schedules", exportHandler.CreateExportSchedule)
+			protected.GET("/export-schedules", exportHandler.ListExportSchedules)
+			protected.GET("/export-schedules/:id", exportHandler.GetExportSchedule)
+			protected.PUT("/export-schedules/:id", exportHandler.UpdateExportSchedule)
+			protected.DELETE("/export-schedules/:id", exportHandler.DeleteExportSchedule)
 
 			protected.POST("/admin/rate-limit/reset", middleware.RequireRole("admin"), middleware.AdminResetRateLimit(cfg))
 			protected.GET("/admin/rate-limit/view", middleware.RequireRole("admin"), middleware.AdminViewRateLimits(cfg))

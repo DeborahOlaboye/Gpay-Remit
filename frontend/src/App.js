@@ -7,6 +7,7 @@ import RecurringSchedules from "./components/RecurringSchedules";
 import WalletDashboard from "./components/WalletDashboard";
 import InvoiceViewer from "./components/InvoiceViewer";
 import EmailPreferences from "./components/EmailPreferences";
+import ExportSchedules from "./components/ExportSchedules";
 import ErrorBoundary from "./components/ErrorBoundary";
 import TransactionHistory from "./pages/TransactionHistory";
 import Onboarding from "./components/Onboarding";
@@ -189,6 +190,7 @@ function AppShell({
     { to: "/wallet", label: t.wallet },
     { to: "/invoices", label: t.invoices },
     { to: "/transactions", label: t.history },
+    { to: "/exports", label: "Exports" },
     { to: "/preferences", label: "Preferences" },
   ];
 
@@ -323,6 +325,7 @@ function AppShell({
                   <Route path="/wallet" element={<WalletDashboard />} />
                   <Route path="/invoices" element={<InvoiceViewer />} />
                   <Route path="/transactions" element={<TransactionHistory />} />
+                  <Route path="/exports" element={<ExportSchedules />} />
                   <Route path="/preferences" element={<EmailPreferences />} />
                 </Routes>
               </main>
