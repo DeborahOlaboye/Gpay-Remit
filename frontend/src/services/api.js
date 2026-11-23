@@ -178,4 +178,9 @@ export const verifyMFA = (code) => api.post("/auth/mfa/verify", { code });
 export const disableMFA = (password) => api.post("/auth/mfa/disable", { password });
 export const getMFAStatus = () => api.get("/auth/mfa/status");
 
+// ── Email Preferences ───────────────────────────────────────────────────
+export const getEmailPreferences = (config = {}) => api.get("/email-preferences", config);
+export const updateEmailPreferences = (prefs, config = {}) =>
+  api.put("/email-preferences", prefs, config);
+
 export default api;

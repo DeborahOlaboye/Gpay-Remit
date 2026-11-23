@@ -2167,6 +2167,43 @@ paths:
         '401':
           description: Unauthorized
 
+  /email-preferences:
+    get:
+      tags: [Auth]
+      summary: Get email notification preferences
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Email notification preferences
+        '401':
+          description: Unauthorized
+    put:
+      tags: [Auth]
+      summary: Update email notification preferences
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                transaction_confirmations:
+                  type: boolean
+                marketing:
+                  type: boolean
+                security_alerts:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated email preferences
+        '400':
+          description: Validation error (e.g. attempting to disable security alerts)
+        '401':
+          description: Unauthorized
+
   /health:
     servers:
       - url: http://localhost:8080
