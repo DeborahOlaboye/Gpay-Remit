@@ -166,7 +166,7 @@ func executeExportSchedule(
 			return nil
 		}
 		if webhookService != nil {
-			return webhookService.TriggerEvent("export.completed", payload)
+			return webhookService.TriggerWebhook("export.completed", payload)
 		}
 		return fmt.Errorf("no webhook URL or webhook service configured")
 
