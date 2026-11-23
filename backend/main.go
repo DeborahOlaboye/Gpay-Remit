@@ -208,6 +208,7 @@ func registerRoutes(router *gin.Engine, db, readDB *gorm.DB, cfg *config.Config)
 			protected.POST("/auth/mfa/setup", authHandler.SetupMFA)
 			protected.POST("/auth/mfa/verify", authHandler.VerifyMFA)
 			protected.POST("/auth/mfa/disable", authHandler.DisableMFA)
+			protected.POST("/auth/mfa/step-up", authHandler.StepUpMFA)
 			protected.GET("/auth/mfa/status", func(c *gin.Context) {
 				userID, _ := c.Get("userID")
 				var user models.User
@@ -337,6 +338,7 @@ func registerRoutes(router *gin.Engine, db, readDB *gorm.DB, cfg *config.Config)
 			protected.POST("/auth/mfa/setup", authHandler.SetupMFA)
 			protected.POST("/auth/mfa/verify", authHandler.VerifyMFA)
 			protected.POST("/auth/mfa/disable", authHandler.DisableMFA)
+			protected.POST("/auth/mfa/step-up", authHandler.StepUpMFA)
 			protected.GET("/auth/mfa/status", func(c *gin.Context) {
 				userID, _ := c.Get("userID")
 				var user models.User

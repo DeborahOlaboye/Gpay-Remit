@@ -176,6 +176,7 @@ export const resetPassword = (token, newPassword) =>
 export const setupMFA = (password) => api.post("/auth/mfa/setup", { password });
 export const verifyMFA = (code) => api.post("/auth/mfa/verify", { code });
 export const disableMFA = (password) => api.post("/auth/mfa/disable", { password });
+export const stepUpMFA = (code) => api.post("/auth/mfa/step-up", { code });
 export const getMFAStatus = () => api.get("/auth/mfa/status");
 
 // ── Email Preferences ───────────────────────────────────────────────────

@@ -1568,6 +1568,30 @@ paths:
         '401':
           description: Wrong password or invalid token
 
+  /auth/mfa/step-up:
+    post:
+      tags: [Auth]
+      summary: Verify 2FA TOTP code and issue a short-lived step-up token for large transfers
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+      responses:
+        '200':
+          description: Step-up token issued
+        '400':
+          description: MFA not enabled
+        '401':
+          description: Invalid TOTP code
+
   /auth/mfa/status:
     get:
       tags: [Auth]

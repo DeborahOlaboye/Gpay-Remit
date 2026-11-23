@@ -9,6 +9,7 @@ import {
 import { sanitizeInput } from "../utils/sanitize";
 import ConversionPreview from "./ConversionPreview";
 import LoadingSpinner from "./LoadingSpinner";
+import StepUp2FAModal from "./StepUp2FAModal";
 
 const INITIAL = {
   sender_id: "",
@@ -35,6 +36,7 @@ function RemittanceForm() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [submitError, setSubmitError] = useState(null);
+  const [stepUpModal, setStepUpModal] = useState({ open: false, threshold: null, pendingData: null });
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== "undefined" && typeof navigator.onLine === "boolean" ? navigator.onLine : true
   );
@@ -83,7 +85,7 @@ function RemittanceForm() {
     if (fieldErrors[name]) setFieldErrors((prev) => ({ ...prev, [name]: undefined }));
   };
 
-  const executeSubmit = async (dataToSubmit) => {
+  const executeSubmit = async (dataToSubmit, extraConfig = {}) => {
     const errors = validateRemittanceForm(dataToSubmit);
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
@@ -104,11 +106,22 @@ function RemittanceForm() {
     setResult(null);
 
     try {
-      const response = await sendRemittance(dataToSubmit);
+      const response = await sendRemittance(dataToSubmit, extraConfig);
       setResult(response.data);
       setFormData(INITIAL);
       setFieldErrors({});
     } catch (err) {
+      if (err?.code === "STEP_UP_2FA_REQUIRED" || err?.requires_2fa) {
+        if (err?.code === "STEP_UP_2FA_REQUIRED") {
+          setStepUpModal({
+            open: true,
+            threshold: err.threshold || null,
+            pendingData: dataToSubmit,
+          });
+          return;
+        }
+      }
+
       let errorType = "general";
       let errorMsg = "Failed to send remittance.";
 
@@ -333,6 +346,19 @@ function RemittanceForm() {
           </button>
         </div>
       )}
+
+      <StepUp2FAModal
+        isOpen={stepUpModal.open}
+        threshold={stepUpModal.threshold}
+        onVerified={(stepUpToken) => {
+          const pending = stepUpModal.pendingData;
+          setStepUpModal({ open: false, threshold: null, pendingData: null });
+          if (pending) {
+            executeSubmit(pending, { headers: { "X-Step-Up-Token": stepUpToken } });
+          }
+        }}
+        onCancel={() => setStepUpModal({ open: false, threshold: null, pendingData: null })}
+      />
     </div>
   );
 }
