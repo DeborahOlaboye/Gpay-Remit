@@ -94,6 +94,7 @@ func main() {
 	workers.StartMonitor(baseCtx, &wg)
 	workers.StartWebhookRetryWorker(baseCtx, &wg, db)
 	workers.StartPaymentRequestExpiryWorker(baseCtx, &wg, db)
+	workers.StartExportSchedulerWorker(baseCtx, &wg, db, cfg)
 	if cfg.RecurringWorkerEnabled {
 		workers.StartRecurringPaymentWorker(baseCtx, &wg, db, cfg)
 	}
@@ -186,7 +187,7 @@ func registerRoutes(router *gin.Engine, db, readDB *gorm.DB, cfg *config.Config)
 
 	api := router.Group("/api/v1")
 	{
-		emailService := services.NewEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.EmailEnabled)
+		emailService := services.NewEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.EmailEnabled).WithDB(db)
 		authHandler := handlers.NewAuthHandler(db, cfg, emailService)
 		api.POST("/auth/register", authHandler.Register)
 		api.POST("/auth/login", authHandler.Login)
@@ -208,6 +209,7 @@ func registerRoutes(router *gin.Engine, db, readDB *gorm.DB, cfg *config.Config)
 			protected.POST("/auth/mfa/setup", authHandler.SetupMFA)
 			protected.POST("/auth/mfa/verify", authHandler.VerifyMFA)
 			protected.POST("/auth/mfa/disable", authHandler.DisableMFA)
+			protected.POST("/auth/mfa/step-up", authHandler.StepUpMFA)
 			protected.GET("/auth/mfa/status", func(c *gin.Context) {
 				userID, _ := c.Get("userID")
 				var user models.User
@@ -275,13 +277,21 @@ func registerRoutes(router *gin.Engine, db, readDB *gorm.DB, cfg *config.Config)
 
 			exportHandler := handlers.NewExportHandler(db, readDB)
 			protected.GET("/transactions/export", exportHandler.ExportTransactions)
+			protected.POST("/export-schedules", exportHandler.CreateExportSchedule)
+			protected.GET("/export-schedules", exportHandler.ListExportSchedules)
+			protected.GET("/export-schedules/:id", exportHandler.GetExportSchedule)
+			protected.PUT("/export-schedules/:id", exportHandler.UpdateExportSchedule)
+			protected.DELETE("/export-schedules/:id", exportHandler.DeleteExportSchedule)
 
 			// Admin rate limit management endpoints
 			protected.POST("/admin/rate-limit/reset", middleware.RequireRole("admin"), middleware.AdminResetRateLimit(cfg))
 			protected.GET("/admin/rate-limit/view", middleware.RequireRole("admin"), middleware.AdminViewRateLimits(cfg))
 
 			// Payment request endpoints
-			emailService := services.NewEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.EmailEnabled)
+			emailService := services.NewEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.EmailEnabled).WithDB(db)
+			emailPrefHandler := handlers.NewEmailPreferencesHandler(db)
+			protected.GET("/email-preferences", emailPrefHandler.GetEmailPreferences)
+			protected.PUT("/email-preferences", emailPrefHandler.UpdateEmailPreferences).WithDB(db)
 			paymentRequestHandler := handlers.NewPaymentRequestHandler(db, feeService, emailService)
 			protected.POST("/payment-requests", paymentRequestHandler.CreatePaymentRequest)
 			protected.GET("/payment-requests", paymentRequestHandler.ListPaymentRequests)
@@ -313,7 +323,7 @@ func registerRoutes(router *gin.Engine, db, readDB *gorm.DB, cfg *config.Config)
 	api2 := router.Group("/api/v2")
 	api2.Use(middleware.RequireVersion("v2"))
 	{
-		emailService := services.NewEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.EmailEnabled)
+		emailService := services.NewEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.EmailEnabled).WithDB(db)
 		authHandler := handlers.NewAuthHandler(db, cfg, emailService)
 		api2.POST("/auth/register", authHandler.Register)
 		api2.POST("/auth/login", authHandler.Login)
@@ -334,6 +344,7 @@ func registerRoutes(router *gin.Engine, db, readDB *gorm.DB, cfg *config.Config)
 			protected.POST("/auth/mfa/setup", authHandler.SetupMFA)
 			protected.POST("/auth/mfa/verify", authHandler.VerifyMFA)
 			protected.POST("/auth/mfa/disable", authHandler.DisableMFA)
+			protected.POST("/auth/mfa/step-up", authHandler.StepUpMFA)
 			protected.GET("/auth/mfa/status", func(c *gin.Context) {
 				userID, _ := c.Get("userID")
 				var user models.User
@@ -401,12 +412,20 @@ func registerRoutes(router *gin.Engine, db, readDB *gorm.DB, cfg *config.Config)
 
 			exportHandler := handlers.NewExportHandler(db, readDB)
 			protected.GET("/transactions/export", exportHandler.ExportTransactions)
+			protected.POST("/export-schedules", exportHandler.CreateExportSchedule)
+			protected.GET("/export-schedules", exportHandler.ListExportSchedules)
+			protected.GET("/export-schedules/:id", exportHandler.GetExportSchedule)
+			protected.PUT("/export-schedules/:id", exportHandler.UpdateExportSchedule)
+			protected.DELETE("/export-schedules/:id", exportHandler.DeleteExportSchedule)
 
 			protected.POST("/admin/rate-limit/reset", middleware.RequireRole("admin"), middleware.AdminResetRateLimit(cfg))
 			protected.GET("/admin/rate-limit/view", middleware.RequireRole("admin"), middleware.AdminViewRateLimits(cfg))
 
 			// Payment request endpoints
-			emailService := services.NewEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.EmailEnabled)
+			emailService := services.NewEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.EmailEnabled).WithDB(db)
+			emailPrefHandler := handlers.NewEmailPreferencesHandler(db)
+			protected.GET("/email-preferences", emailPrefHandler.GetEmailPreferences)
+			protected.PUT("/email-preferences", emailPrefHandler.UpdateEmailPreferences).WithDB(db)
 			paymentRequestHandler := handlers.NewPaymentRequestHandler(db, feeService, emailService)
 			protected.POST("/payment-requests", paymentRequestHandler.CreatePaymentRequest)
 			protected.GET("/payment-requests", paymentRequestHandler.ListPaymentRequests)

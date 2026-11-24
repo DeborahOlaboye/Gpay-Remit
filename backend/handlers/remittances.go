@@ -135,6 +135,7 @@ type CreateRemittanceRequest struct {
 	Conditions       map[string]interface{} `json:"conditions"`
 	Notes            string                 `json:"notes"`
 	Tags             []string               `json:"tags"`
+	TOTPCode         string                 `json:"totp_code"`
 }
 
 type BatchPaymentItem struct {
@@ -149,6 +150,7 @@ type CreateBatchRemittanceRequest struct {
 	AssetCode     string             `json:"asset_code" binding:"required"`
 	AssetIssuer   string             `json:"asset_issuer"`
 	Payments      []BatchPaymentItem `json:"payments" binding:"required"`
+	TOTPCode      string             `json:"totp_code"`
 }
 
 type BatchItemError struct {
@@ -174,6 +176,55 @@ type SendRemittanceRequest struct {
 	TargetCurrency string   `json:"target_currency"`
 	Notes          string   `json:"notes"`
 	Tags           []string `json:"tags"`
+	TOTPCode       string   `json:"totp_code"`
+}
+
+// verifyLargeTransfer2FA enforces step-up 2FA verification when a transfer
+// amount exceeds config.Requires2FAThreshold. Returns true if the request is
+// authorized to proceed, or writes a 403 error response and returns false.
+func (h *RemittanceHandler) verifyLargeTransfer2FA(c *gin.Context, userID uint, amount int64, inlineTOTP string) bool {
+	if h.config == nil || h.config.Requires2FAThreshold <= 0 || amount <= h.config.Requires2FAThreshold {
+		return true
+	}
+
+	var user models.User
+	if err := h.db.First(&user, userID).Error; err != nil {
+		c.Error(errors.NewUnauthorizedError("User not found"))
+		return false
+	}
+
+	if !user.MFAEnabled {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": gin.H{
+				"code":         "MFA_SETUP_REQUIRED",
+				"message":      "Two-factor authentication must be enabled for transfers above the threshold",
+				"requires_2fa": true,
+				"threshold":    h.config.Requires2FAThreshold,
+			},
+		})
+		return false
+	}
+
+	stepUpToken := strings.TrimSpace(c.GetHeader("X-Step-Up-Token"))
+	if stepUpToken != "" {
+		if err := VerifyStepUpToken(stepUpToken, h.config.JWTSecret, userID); err == nil {
+			return true
+		}
+	}
+
+	if strings.TrimSpace(inlineTOTP) != "" && user.VerifyTOTP(strings.TrimSpace(inlineTOTP)) {
+		return true
+	}
+
+	c.JSON(http.StatusForbidden, gin.H{
+		"error": gin.H{
+			"code":         "STEP_UP_2FA_REQUIRED",
+			"message":      "2FA verification required for transfers above threshold",
+			"requires_2fa": true,
+			"threshold":    h.config.Requires2FAThreshold,
+		},
+	})
+	return false
 }
 
 func (h *RemittanceHandler) SendRemittance(c *gin.Context) {
@@ -194,6 +245,10 @@ func (h *RemittanceHandler) SendRemittance(c *gin.Context) {
 		if id, ok := uid.(uint); ok && id > 0 {
 			ownerID = id
 		}
+	}
+
+	if !h.verifyLargeTransfer2FA(c, ownerID, req.Amount, req.TOTPCode) {
+		return
 	}
 
 	feeBreakdown := h.fees.Calculate(req.Amount)
@@ -262,6 +317,9 @@ func (h *RemittanceHandler) CreateRemittance(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+	if !h.verifyLargeTransfer2FA(c, userID.(uint), req.Amount, req.TOTPCode) {
 		return
 	}
 	ctx = utils.WithRequestContext(ctx, c.GetString("requestID"), userID)
@@ -364,6 +422,16 @@ func (h *RemittanceHandler) CreateBatchRemittance(c *gin.Context) {
 	}
 	if len(req.Payments) > maxBatch {
 		c.Error(errors.NewValidationError(fmt.Sprintf("Batch size cannot exceed %d payments", maxBatch), nil))
+		return
+	}
+
+	var totalBatchAmount int64
+	for _, p := range req.Payments {
+		if p.Amount > 0 {
+			totalBatchAmount += p.Amount
+		}
+	}
+	if !h.verifyLargeTransfer2FA(c, userID, totalBatchAmount, req.TOTPCode) {
 		return
 	}
 

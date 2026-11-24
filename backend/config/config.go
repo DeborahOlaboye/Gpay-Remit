@@ -196,6 +196,10 @@ type Config struct {
 	// Batch remittance configuration
 	MaxBatchSize int
 
+	// 2FA step-up threshold for large transfers (minor units, e.g. 100000 = $1,000.00).
+	// Transfers strictly above this amount require recent 2FA verification.
+	Requires2FAThreshold int64
+
 	// Recurring remittance worker configuration (off by default)
 	RecurringWorkerEnabled   bool
 	RecurringWorkerInterval  time.Duration
@@ -374,7 +378,8 @@ func LoadConfig() (*Config, error) {
 
 		SandboxMode: sandbox,
 
-		MaxBatchSize: getEnvAsInt("MAX_BATCH_SIZE", 100),
+		MaxBatchSize:         getEnvAsInt("MAX_BATCH_SIZE", 100),
+		Requires2FAThreshold: int64(getEnvAsInt("REQUIRES_2FA_THRESHOLD", 100000)),
 
 		RecurringWorkerEnabled:   getEnvOrDefault("RECURRING_WORKER_ENABLED", "false") == "true",
 		RecurringWorkerInterval:  getEnvAsDuration("RECURRING_WORKER_INTERVAL", 1*time.Minute),

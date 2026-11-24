@@ -88,15 +88,8 @@ func (s *WebhookDeliveryService) TriggerWebhookWithContext(event string, data ma
 	normalizeAmounts(data)
 
 	for _, webhook := range webhooks {
-		// Check if webhook is subscribed to this event
-		events := strings.Split(webhook.Events, ",")
-		subscribed := false
-		for _, e := range events {
-			if strings.TrimSpace(e) == event || strings.TrimSpace(e) == "*" {
-				subscribed = true
-				break
-			}
-		}
+		// Check if webhook is subscribed to this event (supports exact, "*", and "<prefix>.*")
+		subscribed := webhook.SubscribedTo(event)
 
 		if !subscribed {
 			continue

@@ -176,6 +176,20 @@ export const resetPassword = (token, newPassword) =>
 export const setupMFA = (password) => api.post("/auth/mfa/setup", { password });
 export const verifyMFA = (code) => api.post("/auth/mfa/verify", { code });
 export const disableMFA = (password) => api.post("/auth/mfa/disable", { password });
+export const stepUpMFA = (code) => api.post("/auth/mfa/step-up", { code });
 export const getMFAStatus = () => api.get("/auth/mfa/status");
+
+// ── Email Preferences ───────────────────────────────────────────────────
+export const getEmailPreferences = (config = {}) => api.get("/email-preferences", config);
+export const updateEmailPreferences = (prefs, config = {}) =>
+  api.put("/email-preferences", prefs, config);
+
+// ── Export Schedules ────────────────────────────────────────────────────
+export const getExportSchedules = (config = {}) => api.get("/export-schedules", config);
+export const createExportSchedule = (data, config = {}) => api.post("/export-schedules", data, config);
+export const updateExportSchedule = (id, data, config = {}) =>
+  api.put(`/export-schedules/${id}`, data, config);
+export const deleteExportSchedule = (id, config = {}) =>
+  api.delete(`/export-schedules/${id}`, config);
 
 export default api;
